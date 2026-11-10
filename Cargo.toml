@@ -1,0 +1,16 @@
+[package]
+name = "jay-i"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+authors = ["TyxMatty"]
+description = "The shared installer/updater engine of the Jay apps"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+ureq = { version = "3", features = ["json"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
