@@ -2,6 +2,8 @@
 //! picks its Windows installer, downloads it and runs it only if its SHA-256 matches the `digest`
 //! GitHub computed. Also reads the installed version from the per-user uninstall registry key.
 
+mod http;
+
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -9,7 +11,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// No Jay installer comes near this (Jay-C 0.4.0: 2.3 MB; Jay-A plans up to 20 MB).
 pub const MAX_INSTALLER: u64 = 200 * 1024 * 1024;
@@ -57,31 +59,17 @@ fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
-fn agent(user_agent: &str) -> ureq::Agent {
-    let secs = |s| Some(Duration::from_secs(s));
-    // Resolve, connect, send, receive, per read: a stalled network fails instead of hanging.
-    ureq::Agent::config_builder()
-        .https_only(true)
-        .user_agent(user_agent)
-        .timeout_resolve(secs(10))
-        .timeout_connect(secs(10))
-        .timeout_send_request(secs(30))
-        .timeout_recv_response(secs(30))
-        .timeout_per_read(secs(30))
-        .build()
-        .new_agent()
-}
-
 /// The latest release of `repo` ("owner/name"), or None when it has none yet.
 pub fn latest(repo: &str, user_agent: &str) -> Result<Option<Release>, String> {
     if !valid_repo(repo) {
         return Err(format!("invalid repository: {repo}"));
     }
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-    match agent(user_agent).get(&url).header("Accept", "application/vnd.github+json").call() {
-        Err(ureq::Error::StatusCode(404)) => Ok(None),
-        Err(e) => Err(e.to_string()),
-        Ok(mut response) => response.body_mut().with_config().limit(MAX_JSON).read_json().map(Some).map_err(|e| e.to_string()),
+    let response = http::get(&url, user_agent)?;
+    match response.status {
+        404 => Ok(None),
+        200 => serde_json::from_reader(response.take(MAX_JSON)).map(Some).map_err(|e| e.to_string()),
+        status => Err(format!("GitHub answered {status}")),
     }
 }
 
@@ -174,10 +162,12 @@ pub fn download(installer: &Installer, user_agent: &str, on_progress: impl FnMut
     if !installer.name.ends_with("_x64-setup.exe") || !plain_name(&installer.name) || installer.size > MAX_INSTALLER {
         return Err(format!("unexpected installer: {} ({} bytes)", installer.name, installer.size));
     }
-    let mut response = agent(user_agent).get(&installer.url).call().map_err(|e| e.to_string())?;
-    // ureq stops bodies at 10 MB by default.
-    let body = response.body_mut().with_config().limit(installer.size + 1).reader();
-    store(&fresh_dir(), body, installer, on_progress)
+    let response = http::get(&installer.url, user_agent)?;
+    if response.status != 200 {
+        return Err(format!("{}: HTTP {}", installer.url, response.status));
+    }
+    // `store` stops past the size GitHub gave.
+    store(&fresh_dir(), response, installer, on_progress)
 }
 
 pub enum Mode {
@@ -403,10 +393,10 @@ mod tests {
     fn download_fails_offline_and_leaves_nothing() {
         let _lock = DIRS.lock().unwrap_or_else(|e| e.into_inner());
         let before = jay_dirs();
-        // Refused by https_only before any connection, not by a failed one.
+        // Refused before any connection, not by a failed one.
         let http = by_hand("http://github.com/x/y/releases/download/v1/a_x64-setup.exe", "a_x64-setup.exe", 10);
         let err = download(&http, "Jay-I test", |_, _| {}).unwrap_err();
-        assert!(err.contains("https only"), "{err}");
+        assert!(err.contains("not an https address"), "{err}");
         for installer in [
             by_hand("http://github.com/x/y/releases/download/v1/a_x64-setup.exe", "a_x64-setup.exe", 10),
             by_hand("https://nonexistent.invalid/a_x64-setup.exe", "a_x64-setup.exe", 10),

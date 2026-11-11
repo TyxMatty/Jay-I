@@ -41,22 +41,24 @@ pub fn installed(name: &str) -> Result<Option<Installed>, String>;  // HKCU Unin
 pub fn newer(latest: &str, current: &str) -> bool;
 ```
 
-- **`latest`.** `repo` must be `owner/name` (ASCII alphanumeric, `-`, `_`, `.`; no `..`); otherwise an error, before any network access. `GET https://api.github.com/repos/{repo}/releases/latest` through `ureq` 3, https only (a redirect to http is refused), timeouts of 10 s to resolve and connect and 30 s to send, receive the response and for each read, the caller's User-Agent, body capped at 1 MiB. 404 becomes `None`.
+- **`latest`.** `repo` must be `owner/name` (ASCII alphanumeric, `-`, `_`, `.`; no `..`); otherwise an error, before any network access. `GET https://api.github.com/repos/{repo}/releases/latest` through WinHTTP (`src/http.rs`), https only (a redirect to http is refused), timeouts of 10 s to resolve and connect and 30 s to send and receive, the caller's User-Agent, body capped at 1 MiB. 404 becomes `None`.
 - **`pick_installer`.** Takes the first asset ending in `_x64-setup.exe`. The URL must start with `https://github.com/{repo}/releases/download/`; the name must not contain `/`, `\` or `:`; the size is at most 200 MiB; GitHub's `digest` must be `sha256:` plus 64 hex digits (uppercase passes). No `digest`, no installer.
 - **`download`.** Creates `%TEMP%\jay-i-<pid>-<nanos>-<counter>` with `create_dir` (fails if present), reads the body with a limit of size+1, writes it to the file while computing the SHA-256, compares the length and the hash, and removes the whole directory on any failure. Not resumable (installers are 2 to 5 MB). On success the directory stays, so the caller can run from it.
 - **`run`.** `Interactive`: no arguments (the NSIS window). `Update { relaunch }`: `/P /UPDATE`, plus `/R` if `relaunch`; `/P` shows only the progress bar, `/UPDATE` keeps settings, `/R` reopens the app. Arguments as a list, never through a shell.
 - **`installed`.** Per user only: `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\{name}`, reads `DisplayVersion` and `InstallLocation` with the quotes trimmed. `name` must be ASCII alphanumeric or `-`. A missing key is `None`; a missing `DisplayVersion` is an error.
 - **`newer`.** Strips `v`/`V`, ignores `-suffix` and `+build`, a missing part counts as 0, any non-numeric part means "not newer".
 
-Dependencies: `ureq` 3 (json), `sha2` 0.10, `serde` 1 and `winreg` 0.56 (Windows only). These are what Jay-H already uses; nothing new. `serde_json` comes in through ureq's `json` feature (the crate doesn't call it directly).
+Dependencies: `sha2` 0.10, `serde` 1, `serde_json` 1 and, on Windows only, `winreg` 0.56 and `windows` 0.62 (WinHTTP). No Rust HTTP client or TLS stack.
+
+**Why WinHTTP and not `ureq`.** The crate's first version used `ureq` 3 + rustls. Measured on 2026-11-10: it only takes a proxy from the `HTTPS_PROXY`/`ALL_PROXY` variables (it ignores the proxy configured in Windows) and only trusts its built-in roots (`webpki-roots`), so it fails behind a company proxy (`UnknownIssuer` when the proxy inspects TLS). WinHTTP, opened with `WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY`, uses the system and per-user proxy and Windows' certificates. Measured with a local proxy: the check goes through the proxy; a certificate from a root Windows doesn't know is refused (`0x80072f8f`). *Not measured:* PAC/WPAD, a company root really installed, and a proxy that asks for a password (NTLM/Kerberos; a fake proxy asking for NTLM got no credentials).
 
 ## 4. What the three copies did differently
 
 | # | Point | Jay-H | Jay-E | Jay-C | What Jay-I keeps |
 |---|---|---|---|---|---|
-| 1 | HTTP client | `ureq` | `ureq` | WinHTTP (no Rust TLS stack) | `ureq` (rustls). Jay-C loses its "no TLS stack" property when it adopts the crate: that is the trade-off |
+| 1 | HTTP client | `ureq` | `ureq` | WinHTTP (no Rust TLS stack) | WinHTTP, from Jay-C: Windows' proxy and certificates |
 | 2 | Cap on the release JSON | no | no | 1 MiB | 1 MiB |
-| 3 | https only, redirects included | partial | partial | yes (WinHTTP secure flag; `split_url` rejects http, `user@host`, `:port`) | `https_only` in `ureq`; the download URL is pinned to `https://github.com/{repo}/releases/download/` by `pick_installer`, which already rules out userinfo and ports |
+| 3 | https only, redirects included | partial | partial | yes (WinHTTP secure flag; `split_url` rejects http, `user@host`, `:port`) | WinHTTP's secure flag and `split_url` (rejects http, `user@host`, `:port`); the download URL is pinned to `https://github.com/{repo}/releases/download/` by `pick_installer`, which already rules out userinfo and ports |
 | 4 | Timeouts | no | no | 10/10/30/30 s | 10/10/30/30 s, plus one per read |
 | 5 | 404 on `latest` | error | "no release" | "no release" | `None` |
 | 6 | Download | to disk, size+1 limit | to disk, size+1 limit | all in memory, then written | to disk, streamed |
@@ -209,9 +211,9 @@ The line's 10-point checklist, applied to stage 1. For each: what was checked an
 3. **Data permissions.** Files in `%TEMP%` with the user's default permissions; per-user registry (HKCU). No student data is touched. *Not checked:* custom ACLs on the temp dir (there are none).
 4. **Untrusted input to a sensitive operation.** The release JSON goes through validation of URL, file name, size and hash before it becomes an `Installer`. The installer path only comes from our own temp dir. Arguments are a fixed list, no shell. The registry name is validated. *Checked:* the tests in point 10. *Not checked:* the installer's contents.
 5. **Exposed credentials.** None. No token; the GitHub API is anonymous, with a limit of 60 requests per hour per IP. *Checked:* no secret in the code or the tests. *Effect:* behind a shared IP, `latest` can fail with 403; the caller shows the error.
-6. **Authentication.** TLS to `api.github.com` and `github.com` (rustls, webpki roots). The installers are **not code-signed**. The SHA-256 comes from GitHub's own asset `digest`, i.e. the same trust root as the download itself: it protects against corruption, truncation and a swapped CDN object, **not** against a compromised GitHub account or repository. *Not checked:* who published the release.
+6. **Authentication.** TLS to `api.github.com` and `github.com` (WinHTTP/SChannel, with the roots Windows trusts: a root installed by the machine's administrator, such as a TLS-inspecting proxy's, is accepted, like in a browser). The installers are **not code-signed**. The SHA-256 comes from GitHub's own asset `digest`, i.e. the same trust root as the download itself: it protects against corruption, truncation and a swapped CDN object, **not** against a compromised GitHub account or repository. *Not checked:* who published the release.
 7. **Resource abuse and races.** JSON capped at 1 MiB, installer at 200 MiB, body read up to size+1, timeouts on every step. TOCTOU between the check and the run: the file sits in a fresh per-call directory in `%TEMP%`, and another process of the same user could replace it before the caller runs it; but an attacker running as the same user has already won. The crate has no install lock (section 4, row 10).
-8. **Dependency chain.** `ureq`, `rustls`, `sha2`, `serde`, `winreg`. `Cargo.lock` committed. `cargo audit` 0.23.0 (2026-11-10): 0 vulnerabilities in 446 crates; 2 warnings that do not fail it, in crates only Tauri's Linux build uses (`glib` 0.18.5 unsound, `proc-macro-error` unmaintained). It runs in CI on every push and every Monday. *Checked:* no new dependency compared with Jay-H.
+8. **Dependency chain.** `sha2`, `serde`, `serde_json`, `winreg`, `windows`. `Cargo.lock` committed. `cargo audit` 0.23.0 (2026-11-10): 0 vulnerabilities in 446 crates; 2 warnings that do not fail it, in crates only Tauri's Linux build uses (`glib` 0.18.5 unsound, `proc-macro-error` unmaintained). It runs in CI on every push and every Monday. *Checked:* no new dependency compared with Jay-H.
 9. **Network exposure.** Outbound only, `https_only`, no listening socket.
 10. **Adversarial tests and release criteria.** Cases, all offline except the last:
     - lookalike host (`github.com.evil.example`) refused;
