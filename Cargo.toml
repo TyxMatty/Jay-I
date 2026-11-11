@@ -14,3 +14,13 @@ ureq = { version = "3", features = ["json"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+
+[workspace]
+members = [".", "setup"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

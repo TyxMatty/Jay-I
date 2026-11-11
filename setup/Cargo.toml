@@ -1,0 +1,16 @@
+[package]
+name = "jay-i-setup"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The setup.exe shell of the Jay apps"
+
+[dependencies]
+jay-i = { path = ".." }
+tauri = { version = "2.12.5", features = ["custom-protocol"] }
+winreg = "0.56"
+
+[build-dependencies]
+tauri-build = "2.7.4"

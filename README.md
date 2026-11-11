@@ -2,7 +2,7 @@
 
 **English** · [Português](README.pt-BR.md)
 
-The installer layer of the Jay line. Jay-I is a Rust library (`jay-i`, no Tauri) that finds the latest release of a Jay app on GitHub, downloads its installer, checks it, and runs it. It replaces the three copies of this logic that Jay-H, Jay-E and Jay-C carry today.
+The installer layer of the Jay line. Jay-I is a Rust library (`jay-i`, no Tauri) that finds the latest release of a Jay app on GitHub, downloads its installer, checks it, and runs it, plus the `setup.exe` (`setup/`): a small window with the Jay look that carries an app's installer and runs it silently. The library replaces the three copies of this logic that Jay-H, Jay-E and Jay-C carry today.
 
 Windows only, like the rest of the line.
 
@@ -11,7 +11,7 @@ Windows only, like the rest of the line.
 | Stage | What | State |
 |---|---|---|
 | 1 | The `jay-i` crate | done |
-| 2 | `setup.exe` with the Jay UI, wrapping each app's installer | to do |
+| 2 | `setup.exe` with the Jay UI, wrapping each app's installer | built; not yet proven on a real install (the author runs the real one outside) |
 | 3 | Each Jay replaces its own copy with the crate | to do |
 
 ## API
@@ -57,10 +57,30 @@ jay-i = { path = "../Jay-I" }
 
 Once the repository is public: `jay-i = { git = "https://github.com/TyxMatty/Jay-I" }`.
 
+## Build a setup
+
+The payload is the app's own Tauri NSIS installer, from `npm run tauri build` (`target/release/bundle/nsis/`).
+
+```powershell
+powershell -File scripts/build-setup.ps1 -Payload <nsis.exe> -Name Jay-S -Version 0.1.1 -Exe jay-s.exe -Icon <icon.ico> -Mark <mark.png> [-OutDir <folder>]
+```
+
+| Parameter | What |
+|---|---|
+| `-Payload` | the NSIS installer that goes inside |
+| `-Name` | app name; ASCII letters, digits and `-` |
+| `-Version` | app version |
+| `-Exe` | the app's exe name, e.g. `jay-s.exe` (used by the "Open" button) |
+| `-Icon` | `.ico` for the setup's exe |
+| `-Mark` | PNG shown in the window |
+| `-OutDir` | where to put the result (default: the current folder) |
+
+The output is `<Name>_<Version>_x64-setup.exe`. A plain `cargo test --workspace` needs none of these inputs.
+
 ## Tests
 
 ```powershell
-cargo test                  # offline; includes the adversarial cases
+cargo test --workspace      # offline; includes the adversarial cases
 cargo test -- --ignored     # downloads Jay-C's real installer and checks it (never runs it)
 ```
 
