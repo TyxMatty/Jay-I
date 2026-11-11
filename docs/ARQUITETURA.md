@@ -267,5 +267,5 @@ Os mesmos 10 pontos, sobre o `setup.exe` (seção 5). Para cada um: o que foi co
 | Etapa | O quê | Estado |
 |---|---|---|
 | 1 | A crate `jay-i` | ✅ |
-| 2 | `setup.exe` com a interface Jay, em volta do instalador NSIS de cada app, rodando em silêncio e caindo para a janela do NSIS sem WebView2 | feita; ainda não provada numa instalação real (o autor roda a de verdade por fora) |
+| 2 | `setup.exe` com a interface Jay, em volta do instalador NSIS de cada app, rodando em silêncio e caindo para a janela do NSIS sem WebView2 | ✅ O autor instalou o Jay-S 0.1.1 com o setup, fora do PC de dev (2026-11-10): instalou certo. Não registrado em separado: atualizar por cima do app aberto, o botão Abrir, um PC sem WebView2 |
 | 3 | Cada Jay (Jay-H, Jay-E, Jay-C, depois os outros) troca a própria cópia pela crate | a fazer |

@@ -267,5 +267,5 @@ The same 10 points, applied to the `setup.exe` (section 5). For each: what was c
 | Stage | What | State |
 |---|---|---|
 | 1 | The `jay-i` crate | ✅ |
-| 2 | `setup.exe` with the Jay UI, wrapping each app's NSIS installer, running it silently and falling back to the NSIS window without WebView2 | built; not yet proven on a real install (the author runs the real one outside) |
+| 2 | `setup.exe` with the Jay UI, wrapping each app's NSIS installer, running it silently and falling back to the NSIS window without WebView2 | ✅ The author installed Jay-S 0.1.1 with the setup, outside the dev environment (2026-11-10): it installed correctly. Not recorded separately: updating over the running app, the Open button, a PC without WebView2 |
 | 3 | Each Jay (Jay-H, Jay-E, Jay-C, then the others) replaces its own copy with the crate | to do |
